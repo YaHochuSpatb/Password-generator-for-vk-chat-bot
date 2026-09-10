@@ -1,0 +1,107 @@
+import random
+
+import vk_api
+from vk_api.longpoll import VkLongPoll, VkEventType
+
+import config
+
+vk_session = vk_api.VkApi(token=config.token)
+vk = vk_session.get_api()
+longpoll = VkLongPoll(vk_session)
+
+
+def send_msg(user_id, message):
+    vk.messages.send(
+        user_id=user_id,
+        message=message,
+        random_id=random.randint(1, 2 ** 31)
+    )
+
+
+def ask_yes_no(user_id, question):
+    """Задаёт вопрос и ждёт ответ 'да'/'нет'. Возвращает True/False."""
+    send_msg(user_id, question)
+    for event in longpoll.listen():
+        if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+            answer = event.text.lower().strip()
+            if answer == 'да':
+                return True
+            elif answer == 'нет':
+                return False
+            else:
+                send_msg(user_id, "Ответьте, пожалуйста, 'да' или 'нет'.")
+
+
+def ask_length(user_id):
+    """Спрашивает длину пароля, проверяет, что введено число."""
+    send_msg(user_id, "Какая длина пароля вас интересует? Введите число.")
+    for event in longpoll.listen():
+        if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+            answer = event.text.strip()
+            if answer.isdigit() and int(answer) > 0:
+                return int(answer)
+            else:
+                send_msg(user_id, "Введите, пожалуйста, положительное число.")
+
+
+def generate_password(length, use_digits, use_upper, use_lower, use_special):
+    digits = list('0123456789')
+    lower = list('qwertyuiopasdfghjklzxcvbnm')
+    upper = list('QWERTYUIOPASDFGHJKLZXCVBNM')
+    special = list('!#$%&*+-=?@^_')
+
+    pool = []
+    if use_digits:
+        pool += digits
+    if use_upper:
+        pool += upper
+    if use_lower:
+        pool += lower
+    if use_special:
+        pool += special
+
+    if not pool:
+        # если пользователь ничего не выбрал - берём буквы по умолчанию
+        pool = lower + upper
+
+    # random.sample требует k <= len(population) без повторов символов,
+    # поэтому для паролей длиннее набора символов используем choices
+    if length <= len(pool):
+        chars = random.sample(pool, length)
+    else:
+        chars = [random.choice(pool) for _ in range(length)]
+
+    return ''.join(chars)
+
+
+def main():
+    print("Бот запущен, ожидает сообщения...")
+    for event in longpoll.listen():
+        if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+            user_id = event.user_id
+            text = event.text.lower().strip()
+
+            if text == 'начать':
+                send_msg(
+                    user_id,
+                    "Привет! Я бот-генератор паролей. Хотите сгенерировать пароль? (да/нет)"
+                )
+            elif text == 'да':
+                length = ask_length(user_id)
+                use_digits = ask_yes_no(user_id, "Включать ли цифры (0123456789)?")
+                use_upper = ask_yes_no(user_id, "Включать ли прописные буквы (ABC...XYZ)?")
+                use_lower = ask_yes_no(user_id, "Включать ли строчные буквы (abc...xyz)?")
+                use_special = ask_yes_no(user_id, "Включать ли специальные символы (!#$%&*+-=?@^_)?")
+
+                password = generate_password(
+                    length, use_digits, use_upper, use_lower, use_special
+                )
+                send_msg(user_id, f"Ваш пароль: {password}")
+            elif text == 'нет':
+                send_msg(user_id, "Хорошо, напишите 'начать', когда понадоблюсь.")
+            else:
+                send_msg(user_id, "Напишите 'начать', чтобы сгенерировать пароль.")
+
+
+if __name__ == '__main__':
+    main()
